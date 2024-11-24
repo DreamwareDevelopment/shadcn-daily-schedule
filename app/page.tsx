@@ -41,6 +41,36 @@ const schedule: CalendarEvent[] = [
     isAllDay: true,
     color: "mediumpurple",
   },
+  {
+    id: 5,
+    title: "Afternoon Workshop",
+    subtitle: "Skill Development",
+    description: "Workshop on new technology trends",
+    startTime: "14:00",
+    endTime: "15:30",
+    isAllDay: false,
+    color: "goldenrod",
+  },
+  {
+    id: 6,
+    title: "Evening Yoga",
+    subtitle: "",
+    description: "Relaxing yoga session",
+    startTime: "18:00",
+    endTime: "19:00",
+    isAllDay: false,
+    color: "lightcoral",
+  },
+  {
+    id: 7,
+    title: "Dinner with Friends",
+    subtitle: "",
+    description: "Dinner at the new restaurant in town",
+    startTime: "20:00",
+    endTime: "22:00",
+    isAllDay: false,
+    color: "darkorange",
+  },
 ];
 
 export default function Home() {
