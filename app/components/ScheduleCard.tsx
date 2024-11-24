@@ -12,7 +12,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
+import { binarySearchInsert, cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Accordion, AccordionTrigger, AccordionItem, AccordionContent } from "@/components/ui/accordion";
@@ -26,6 +26,14 @@ export interface CalendarEvent {
   endTime: string | null;
   isAllDay: boolean;
   color: string;
+}
+
+export interface ViewEvent extends CalendarEvent {
+  top: number;
+  height: number;
+  left: number;
+  hours: number | null;
+  minutes: number | null;
 }
 
 interface ScheduleCardProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -72,153 +80,158 @@ export const ScheduleCard = ({ schedule, className }: ScheduleCardProps) => {
     return ((endInMinutes - startInMinutes) / 60) * HOUR_HEIGHT;
   };
 
+  const allDayEvents: CalendarEvent[] = [];
+  const events: ViewEvent[] = [];
+  for (const event of schedule) {
+    if (!event.isAllDay && event.startTime && event.endTime) {
+      const newEvent = {
+        ...event,
+        hours: event.startTime ? parseInt(event.startTime?.split(':')[0]) : null,
+        minutes: event.startTime ? parseInt(event.startTime?.split(':')[1]) : null,
+        top: getEventPosition(event.startTime || ''),
+        height: getEventHeight(event.startTime || '', event.endTime || ''),
+        left: 0
+      };
+      binarySearchInsert(events, newEvent, (a, b) => a.top - b.top);
+    } else if (event.isAllDay) {
+      allDayEvents.push(event);
+    }
+  }
+  const shiftOverlappingEvents = (events: ViewEvent[]) => {
+    for (let i = 0; i < events.length; i++) {
+      for (let j = i + 1; j < events.length; j++) {
+        if (events[j].top >= events[i].top + events[i].height) {
+          // No more overlaps possible, break out of the loop
+          break;
+        }
+        events[j].left = (events[i].left || 0) + 42;
+      }
+    }
+  };
+  shiftOverlappingEvents(events);
+
   useEffect(() => {
     const currentTime = now.getHours() * 60 + now.getMinutes();
-
-    const upcomingEvent = schedule
-      .filter(event => !event.isAllDay && event.startTime)
-      .reduce((selectedEvent: CalendarEvent | null, currentEvent: CalendarEvent) => {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const [currentStartHours, currentStartMinutes] = currentEvent.startTime!.split(':').map(Number);
-        const currentEventTime = currentStartHours * 60 + currentStartMinutes;
-
-        if (!selectedEvent) return currentEvent;
-        if (isToday) {
-          // Show the upcoming event if there are any left for today
-          if (currentEventTime >= currentTime) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const [selectedStartHours, selectedStartMinutes] = selectedEvent.startTime!.split(':').map(Number);
-            const selectedEventTime = selectedStartHours * 60 + selectedStartMinutes;
-            return currentEventTime >= selectedEventTime ? currentEvent : selectedEvent;
-          }
-        } else {
-          // Show the earliest event
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          const [selectedStartHours, selectedStartMinutes] = selectedEvent.startTime!.split(':').map(Number);
-          const selectedEventTime = selectedStartHours * 60 + selectedStartMinutes;
-          return currentEventTime < selectedEventTime ? currentEvent : selectedEvent;
-        }
-        // If there are no upcoming events, show the last event
-        return selectedEvent;
-      }, null);
   
-    const eventToScrollTo = upcomingEvent || schedule[schedule.length - 1];
+    let upcomingEvent = null;
+    if (isToday) {
+      for (let i = 0; i < events.length; i++) {
+        const currentEvent = events[i];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const currentEventTime = currentEvent.hours! * 60 + currentEvent.minutes!;
+  
+        if (!upcomingEvent && currentEventTime >= currentTime) {
+          upcomingEvent = currentEvent;
+        } else if (upcomingEvent) {
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          const selectedEventTime = upcomingEvent.hours! * 60 + upcomingEvent.minutes!;
+          if (currentEventTime >= currentTime && currentEventTime < selectedEventTime) {
+            upcomingEvent = currentEvent;
+          }
+        }
+      }
+    } else {
+      upcomingEvent = events[0];
+    }
+  
+    const eventToScrollTo = upcomingEvent || events[events.length - 1];
   
     if (eventToScrollTo && scrollRef.current) {
-      const position = getEventPosition(eventToScrollTo.startTime || '');
       scrollRef.current.scrollTo({
-        top: position,
+        top: eventToScrollTo.top,
         behavior: "auto"
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, date, is24Hour, view]);
+  }, [events, date, is24Hour, view]);
 
-  const allDayEvents = schedule.filter(event => event.isAllDay);
-  const TimelineView = () => {
-    const events = schedule
-      .filter(event => !event.isAllDay && event.startTime && event.endTime)
-      .map(event => ({
-        ...event,
-        top: getEventPosition(event.startTime || ''),
-        height: getEventHeight(event.startTime || '', event.endTime || '')
-      }));
-
-    // Sort events by start time
-    events.sort((a, b) => a.top - b.top);
-
-    return (
-      <div className="h-full w-full">
-        {allDayEvents.length > 0 && (
-          <Accordion type="single" defaultValue="allDayEvents" collapsible className="pb-3">
-            <AccordionItem value="allDayEvents">
-              <AccordionTrigger>
-                <h3 className="font-medium mb-1 ml-2">All-Day Events</h3>
-              </AccordionTrigger>
-              <AccordionContent>
-                {allDayEvents.map(event => (
-                  <div
-                    key={event.id}
-                    className={cn(
-                      "px-2 mb-2 rounded-md",
-                      "text-white"
-                    )}
-                    style={{
-                      backgroundColor: event.color
-                    }}
-                  >
-                    <div className="font-medium">{event.title}</div>
-                    {event.subtitle && <div className="text-sm italic">{event.subtitle}</div>}
-                    {event.description && <div className="text-sm">{event.description}</div>}
-                  </div>
-                ))}
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        )}
-
-        {/* Scrollable Timeline */}
-        <ScrollArea className="h-[500px] pr-4" scrollRef={scrollRef}>
-          <div className="relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
-            {/* Hour markers and separators */}
-            {Array.from({ length: 24 }, (_, i) => (
-              <div 
-                key={i} 
-                className="absolute w-full"
-                style={{ top: `${i * HOUR_HEIGHT}px` }}
-              >
-                <div className="grid grid-cols-[72px_1fr] lg:grid-cols-[84px_1fr] gap-2">
-                  <div className="text-sm text-muted-foreground text-nowrap sticky left-0">
-                    {formatTime(`${String(i).padStart(2, '0')}:00`)}
-                  </div>
-                  <Separator className="mt-2" />
+  const TimelineView = () => (
+    <div className="h-full w-full">
+      {allDayEvents.length > 0 && (
+        <Accordion type="single" defaultValue="allDayEvents" collapsible className="pb-3">
+          <AccordionItem value="allDayEvents">
+            <AccordionTrigger>
+              <h3 className="font-medium mb-1 ml-2">All-Day Events</h3>
+            </AccordionTrigger>
+            <AccordionContent>
+              {allDayEvents.map(event => (
+                <div
+                  key={event.id}
+                  className={cn(
+                    "px-2 mb-2 rounded-md",
+                    "text-white"
+                  )}
+                  style={{
+                    backgroundColor: event.color
+                  }}
+                >
+                  <div className="font-medium">{event.title}</div>
+                  {event.subtitle && <div className="text-sm italic">{event.subtitle}</div>}
+                  {event.description && <div className="text-sm">{event.description}</div>}
                 </div>
+              ))}
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      )}
+
+      {/* Scrollable Timeline */}
+      <ScrollArea className="h-[500px] pr-4" scrollRef={scrollRef}>
+        <div className="relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
+          {/* Hour markers and separators */}
+          {Array.from({ length: 24 }, (_, i) => (
+            <div 
+              key={i} 
+              className="absolute w-full"
+              style={{ top: `${i * HOUR_HEIGHT}px` }}
+            >
+              <div className="grid grid-cols-[72px_1fr] lg:grid-cols-[84px_1fr] gap-2">
+                <div className="text-sm text-muted-foreground text-nowrap sticky left-0">
+                  {formatTime(`${String(i).padStart(2, '0')}:00`)}
+                </div>
+                <Separator className="mt-2" />
               </div>
-            ))}
+            </div>
+          ))}
 
-            {/* Events */}
-            <div className="absolute left-[100px] lg:left-[117px] right-0 lg:right-2">
-              {events.map((event, index) => {
-                // Check for overlap with previous event
-                const isOverlapping = index > 0 && events[index - 1].top + events[index - 1].height > event.top;
-                const leftOffset = isOverlapping ? '10%' : '0';
-
-                return (
-                  <div
-                    key={event.id}
-                    className={cn(
-                      "absolute px-2 mt-2 rounded-md w-[calc(100%-8px)]",
-                      "text-white"
-                    )}
-                    style={{
-                      backgroundColor: event.color,
-                      top: `${event.top}px`,
-                      height: `${event.height}px`,
-                      minHeight: '20px',
-                      left: leftOffset
-                    }}
-                  >
-                    <div className="text-sm">
-                      {event.title}
-                      {event.height < 45 && (
-                        <span>, {formatTime(event.startTime || '')} - {formatTime(event.endTime || '')}</span>
-                      )}
-                    </div>
-                    {/* Show time on second row only if event is more than 45px */}
-                    {event.height >= 45 && (
-                      <div className="text-sm">
-                        {formatTime(event.startTime || '')} - {formatTime(event.endTime || '')}
-                      </div>
+          {/* Events */}
+          <div className="absolute left-[100px] lg:left-[117px] right-0 lg:right-2">
+            {events.map((event) => {
+              return (
+                <div
+                  key={event.id}
+                  className={cn(
+                    "absolute px-2 mt-2 rounded-md w-[calc(100%-8px)]",
+                    "text-white"
+                  )}
+                  style={{
+                    backgroundColor: event.color,
+                    top: `${event.top}px`,
+                    height: `${event.height}px`,
+                    minHeight: '20px',
+                    left: event.left
+                  }}
+                >
+                  <div className="text-sm">
+                    {event.title}
+                    {event.height < 45 && (
+                      <span>, {formatTime(event.startTime || '')} - {formatTime(event.endTime || '')}</span>
                     )}
                   </div>
-                );
-              })}
-            </div>
+                  {/* Show time on second row only if event is more than 45px */}
+                  {event.height >= 45 && (
+                    <div className="text-sm">
+                      {formatTime(event.startTime || '')} - {formatTime(event.endTime || '')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        </ScrollArea>
-      </div>
-    );
-  };
+        </div>
+      </ScrollArea>
+    </div>
+  );
 
   const ListView = () => (
     <ScrollArea className="h-[576px] pt-4 pr-4 w-full">
